@@ -349,31 +349,31 @@ document.addEventListener('DOMContentLoaded', () => {
         cityEl.textContent = 'Fetching...';
         countryEl.textContent = 'Fetching...';
         try {
-            const response = await fetch('https://ip-api.com/json');
+            let response = await fetch('https://ip-api.com/json');
             if (!response.ok) {
-                // If HTTPS fails, try HTTP as a fallback
-                const fallbackResponse = await fetch('http://ip-api.com/json');
-                if (!fallbackResponse.ok) {
-                    throw new Error(`HTTP error! status: ${fallbackResponse.status}`);
-                }
-                const data = await fallbackResponse.json();
+                response = await fetch('http://ip-api.com/json');
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
                 ipAddressEl.textContent = data.query;
                 ispEl.textContent = data.isp;
                 cityEl.textContent = data.city;
                 countryEl.textContent = data.country;
-                return;
+            } else {
+                throw new Error('Failed to fetch user information.');
             }
-            const data = await response.json();
-            ipAddressEl.textContent = data.query;
-            ispEl.textContent = data.isp;
-            cityEl.textContent = data.city;
-            countryEl.textContent = data.country;
         } catch (error) {
             console.error("Failed to get user info:", error);
-            ipAddressEl.textContent = 'N/A';
-            ispEl.textContent = 'N/A';
-            cityEl.textContent = 'N/A';
-            countryEl.textContent = 'N/A';
+            const errorMessage = 'Could not fetch user info.';
+            ipAddressEl.textContent = errorMessage;
+            ispEl.textContent = errorMessage;
+            cityEl.textContent = errorMessage;
+            countryEl.textContent = errorMessage;
         }
     };
 
