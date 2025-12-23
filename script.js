@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const countryEl = document.getElementById('country');
     const toggleUserInfoBtn = document.getElementById('toggle-user-info');
     const userInfoDetails = document.getElementById('user-info-details');
+    const retryUserInfoBtn = document.getElementById('retry-user-info');
 
     const historyListEl = document.getElementById('history-list');
 
@@ -85,7 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
             "fetching-ip-status": "Fetching...",
             "fetch-isp-error": "Could not fetch ISP info.",
             "toggle-user-info-btn": "Show My Info",
-            "toggle-user-info-btn-hide": "Hide My Info"
+            "toggle-user-info-btn-hide": "Hide My Info",
+            "retry-user-info-btn": "Retry"
         },
         es: {
             "start-btn": "Iniciar Prueba",
@@ -109,7 +111,8 @@ document.addEventListener('DOMContentLoaded', () => {
             "fetching-ip-status": "Buscando...",
             "fetch-isp-error": "No se pudo obtener la información del ISP.",
             "toggle-user-info-btn": "Mostrar Mi Información",
-            "toggle-user-info-btn-hide": "Ocultar Mi Información"
+            "toggle-user-info-btn-hide": "Ocultar Mi Información",
+            "retry-user-info-btn": "Reintentar"
         },
         fr: {
             "start-btn": "Démarrer le Test",
@@ -133,7 +136,8 @@ document.addEventListener('DOMContentLoaded', () => {
             "fetching-ip-status": "Recherche...",
             "fetch-isp-error": "Impossible de récupérer les informations du FAI.",
             "toggle-user-info-btn": "Afficher Mes Informations",
-            "toggle-user-info-btn-hide": "Masquer Mes Informations"
+            "toggle-user-info-btn-hide": "Masquer Mes Informations",
+            "retry-user-info-btn": "Réessayer"
         }
     };
 
@@ -252,22 +256,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const measureUploadSpeed = async () => {
         const testDuration = 15 * 1000; // 15 seconds
+        const warmUpDuration = 2 * 1000; // 2 seconds
         const chunkSize = 1 * 1024 * 1024; // 1MB chunks
         const numChunks = Math.floor(settings.upload.size / chunkSize);
         const chunks = Array(numChunks).fill(new Blob([new ArrayBuffer(chunkSize)], { type: 'application/octet-stream' }));
         const startTime = Date.now();
         let totalSent = 0;
         let lastUpdateTime = 0;
+        let warmUpDataSent = 0;
 
         const uploadChunk = async (chunk) => {
             await fetch(settings.upload.url, {
                 method: 'POST',
                 body: chunk
             });
-            totalSent += chunk.size;
-            const duration = (Date.now() - startTime) / 1000;
+            const duration = Date.now() - startTime;
+            if (duration < warmUpDuration) {
+                warmUpDataSent += chunk.size;
+            } else {
+                totalSent += chunk.size;
+            }
+
             if (duration > 0 && Date.now() - lastUpdateTime > 100) { // Throttle UI updates
-                const speedMbps = (totalSent * 8) / duration / 1000 / 1000;
+                const speedMbps = ((totalSent + warmUpDataSent) * 8) / duration / 1000 / 1000;
                 requestAnimationFrame(() => updateGauge(speedMbps));
                 lastUpdateTime = Date.now();
             }
@@ -287,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         await Promise.all(promises);
 
-        const finalDuration = (Date.now() - startTime) / 1000;
+        const finalDuration = (Date.now() - startTime - warmUpDuration) / 1000;
         const finalSpeedMbps = (totalSent * 8) / finalDuration / 1000 / 1000;
         return finalSpeedMbps.toFixed(2);
     };
@@ -337,6 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Other Functions (getUserInfo, History, Theme, Share) ---
     const getUserInfo = async () => {
+        retryUserInfoBtn.classList.add('hidden');
         ipAddressEl.textContent = 'Fetching...';
         ispEl.textContent = 'Fetching...';
         cityEl.textContent = 'Fetching...';
@@ -364,9 +376,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("Failed to get user info:", error);
             const errorMessage = 'Could not fetch user info.';
             ipAddressEl.textContent = errorMessage;
-            ispEl.textContent = errorMessage;
-            cityEl.textContent = errorMessage;
-            countryEl.textContent = errorMessage;
+            ispEl.textContent = '';
+            cityEl.textContent = '';
+            countryEl.textContent = '';
+            retryUserInfoBtn.classList.remove('hidden');
         }
     };
 
@@ -440,6 +453,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const init = () => {
         startBtn.addEventListener('click', startTest);
         gaugesContainer.classList.add('hidden');
+
+        retryUserInfoBtn.addEventListener('click', getUserInfo);
 
         toggleUserInfoBtn.addEventListener('click', () => {
             const isHidden = userInfoDetails.classList.toggle('hidden');
