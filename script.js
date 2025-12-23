@@ -251,52 +251,45 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const measureUploadSpeed = async () => {
-        return new Promise((resolve, reject) => {
-            const testDuration = 15 * 1000; // 15 seconds
-            const data = new Blob(Array(settings.upload.size).fill('a'), { type: 'application/octet-stream' });
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', settings.upload.url + `?t=${Date.now()}`, true);
+        const testDuration = 15 * 1000; // 15 seconds
+        const chunkSize = 1 * 1024 * 1024; // 1MB chunks
+        const numChunks = Math.floor(settings.upload.size / chunkSize);
+        const chunks = Array(numChunks).fill(new Blob([new ArrayBuffer(chunkSize)], { type: 'application/octet-stream' }));
+        const startTime = Date.now();
+        let totalSent = 0;
+        let lastUpdateTime = 0;
 
-            let startTime = Date.now();
-            let loaded = 0;
-            let lastUpdateTime = 0;
-
-            const timeout = setTimeout(() => {
-                xhr.abort();
-            }, testDuration);
-
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable) {
-                    loaded = event.loaded;
-                    const duration = (Date.now() - startTime) / 1000;
-                    if (duration > 0 && Date.now() - lastUpdateTime > 100) { // Throttle UI updates
-                        const speedMbps = (loaded * 8) / duration / 1000 / 1000;
-                        requestAnimationFrame(() => updateGauge(speedMbps));
-                        lastUpdateTime = Date.now();
-                    }
-                }
-            };
-
-            const calculateAndResolve = () => {
-                clearTimeout(timeout);
-                const finalDuration = (Date.now() - startTime) / 1000;
-                if (finalDuration === 0) {
-                    resolve('0.00');
-                    return;
-                }
-                const speedMbps = (loaded * 8) / finalDuration / 1000 / 1000;
-                resolve(speedMbps.toFixed(2));
+        const uploadChunk = async (chunk) => {
+            await fetch(settings.upload.url, {
+                method: 'POST',
+                body: chunk
+            });
+            totalSent += chunk.size;
+            const duration = (Date.now() - startTime) / 1000;
+            if (duration > 0 && Date.now() - lastUpdateTime > 100) { // Throttle UI updates
+                const speedMbps = (totalSent * 8) / duration / 1000 / 1000;
+                requestAnimationFrame(() => updateGauge(speedMbps));
+                lastUpdateTime = Date.now();
             }
+        };
 
-            xhr.onload = calculateAndResolve;
-            xhr.onabort = calculateAndResolve;
-            xhr.onerror = () => {
-                clearTimeout(timeout);
-                reject(new Error("Upload test failed."));
-            };
+        const promises = [];
+        for (let i = 0; i < 4; i++) { // Use 4 concurrent uploads
+            promises.push((async () => {
+                for (const chunk of chunks) {
+                    if (Date.now() - startTime >= testDuration) {
+                        break;
+                    }
+                    await uploadChunk(chunk);
+                }
+            })());
+        }
 
-            xhr.send(data);
-        });
+        await Promise.all(promises);
+
+        const finalDuration = (Date.now() - startTime) / 1000;
+        const finalSpeedMbps = (totalSent * 8) / finalDuration / 1000 / 1000;
+        return finalSpeedMbps.toFixed(2);
     };
 
     // --- UI Functions ---
