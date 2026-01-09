@@ -254,53 +254,84 @@ document.addEventListener('DOMContentLoaded', () => {
         return finalSpeedMbps.toFixed(2);
     };
 
-    const measureUploadSpeed = async () => {
-        const testDuration = 15 * 1000; // 15 seconds
-        const warmUpDuration = 2 * 1000; // 2 seconds
-        const chunkSize = 1 * 1024 * 1024; // 1MB chunks
-        const numChunks = Math.floor(settings.upload.size / chunkSize);
-        const chunks = Array(numChunks).fill(new Blob([new ArrayBuffer(chunkSize)], { type: 'application/octet-stream' }));
-        const startTime = Date.now();
-        let totalSent = 0;
-        let lastUpdateTime = 0;
-        let warmUpDataSent = 0;
+    const measureUploadSpeed = () => {
+        return new Promise((resolve, reject) => {
+            const testDuration = 15 * 1000;
+            const warmUpDuration = 2 * 1000;
+            const data = new Blob(Array(25).fill(new ArrayBuffer(1024 * 1024)), { type: 'application/octet-stream' }); // 25MB payload
 
-        const uploadChunk = async (chunk) => {
-            await fetch(settings.upload.url, {
-                method: 'POST',
-                body: chunk
-            });
-            const duration = Date.now() - startTime;
-            if (duration < warmUpDuration) {
-                warmUpDataSent += chunk.size;
-            } else {
-                totalSent += chunk.size;
-            }
+            const xhr = new XMLHttpRequest();
+            const startTime = Date.now();
+            let lastLoaded = 0;
+            let lastTime = startTime;
+            let warmupLoaded = 0;
+            let warmupComplete = false;
+            let totalBytesLoaded = 0;
 
-            if (duration > 0 && Date.now() - lastUpdateTime > 100) { // Throttle UI updates
-                const speedMbps = ((totalSent + warmUpDataSent) * 8) / duration / 1000 / 1000;
-                requestAnimationFrame(() => updateGauge(speedMbps));
-                lastUpdateTime = Date.now();
-            }
-        };
+            const speedSamples = [];
+            const movingAverageSamples = 5;
 
-        const promises = [];
-        for (let i = 0; i < 4; i++) { // Use 4 concurrent uploads
-            promises.push((async () => {
-                for (const chunk of chunks) {
-                    if (Date.now() - startTime >= testDuration) {
-                        break;
-                    }
-                    await uploadChunk(chunk);
+            xhr.upload.onprogress = (event) => {
+                totalBytesLoaded = event.loaded;
+                const currentTime = Date.now();
+                const elapsedTime = currentTime - startTime;
+
+                if (!warmupComplete && elapsedTime >= warmUpDuration) {
+                    warmupComplete = true;
+                    warmupLoaded = event.loaded;
+                    lastLoaded = event.loaded;
+                    lastTime = currentTime;
                 }
-            })());
-        }
 
-        await Promise.all(promises);
+                if (warmupComplete) {
+                    const loadedSinceLast = event.loaded - lastLoaded;
+                    const timeSinceLast = currentTime - lastTime;
 
-        const finalDuration = (Date.now() - startTime - warmUpDuration) / 1000;
-        const finalSpeedMbps = (totalSent * 8) / finalDuration / 1000 / 1000;
-        return finalSpeedMbps.toFixed(2);
+                    if (timeSinceLast > 100) { // Throttle UI updates
+                        const speedMbps = (loadedSinceLast * 8) / (timeSinceLast / 1000) / 1000 / 1000;
+
+                        speedSamples.push(speedMbps);
+                        if (speedSamples.length > movingAverageSamples) {
+                            speedSamples.shift();
+                        }
+                        const avgSpeed = speedSamples.reduce((a, b) => a + b, 0) / speedSamples.length;
+
+                        requestAnimationFrame(() => updateGauge(avgSpeed));
+
+                        lastLoaded = event.loaded;
+                        lastTime = currentTime;
+                    }
+                }
+            };
+
+            const calculateFinalSpeed = () => {
+                const finalTime = Date.now();
+                const totalDuration = (finalTime - startTime) / 1000;
+                const durationAfterWarmup = (finalTime - (startTime + warmUpDuration)) / 1000;
+                const totalSentAfterWarmup = totalBytesLoaded - warmupLoaded;
+
+                if (durationAfterWarmup <= 0 || totalSentAfterWarmup <= 0) {
+                     const avgSpeed = (totalBytesLoaded * 8) / totalDuration / 1000 / 1000;
+                     resolve(avgSpeed.toFixed(2));
+                } else {
+                    const finalSpeedMbps = (totalSentAfterWarmup * 8) / durationAfterWarmup / 1000 / 1000;
+                    resolve(finalSpeedMbps.toFixed(2));
+                }
+            };
+
+            xhr.onload = calculateFinalSpeed;
+            xhr.onabort = calculateFinalSpeed;
+            xhr.onerror = () => reject(new Error("Upload test failed due to a network error."));
+
+            xhr.open('POST', settings.upload.url + `?t=${Date.now()}`, true);
+            xhr.send(data);
+
+            setTimeout(() => {
+                if (xhr.readyState === 1 || xhr.readyState === 3) {
+                    xhr.abort();
+                }
+            }, testDuration);
+        });
     };
 
     // --- UI Functions ---
